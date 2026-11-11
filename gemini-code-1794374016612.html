@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Super Mario World - RAM Dashboard</title>
+  <style>
+    :root {
+      --bg-color: #1a1a24;
+      --card-bg: #252538;
+      --accent: #ff4757;
+      --gold: #ffa502;
+      --text: #ffffff;
+    }
+
+    body {
+      margin: 0;
+      padding: 20px;
+      background-color: var(--bg-color);
+      color: var(--text);
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    h1 {
+      margin-top: 0;
+      color: var(--accent);
+      text-transform: uppercase;
+      letter-spacing: 2px;
+    }
+
+    .controls {
+      margin-bottom: 20px;
+    }
+
+    input[type="file"] {
+      background: var(--card-bg);
+      padding: 10px 15px;
+      border-radius: 6px;
+      border: 1px solid #3d3d5c;
+      color: var(--text);
+      cursor: pointer;
+    }
+
+    .main-container {
+      display: flex;
+      gap: 20px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    #game-wrapper {
+      width: 640px;
+      height: 480px;
+      background: #000;
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+    }
+
+    .dashboard {
+      width: 280px;
+      background: var(--card-bg);
+      border-radius: 8px;
+      padding: 20px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+    }
+
+    .stat-card {
+      background: rgba(0, 0, 0, 0.2);
+      padding: 12px 16px;
+      border-radius: 6px;
+      border-left: 4px solid var(--accent);
+    }
+
+    .stat-card.gold { border-color: var(--gold); }
+    .stat-card.green { border-color: #2ed573; }
+
+    .stat-title {
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      opacity: 0.7;
+    }
+
+    .stat-value {
+      font-size: 1.8rem;
+      font-weight: bold;
+      margin-top: 4px;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>SMW RAM Tracker</h1>
+
+  <div class="controls">
+    <input type="file" id="rom-input" accept=".sfc,.smc">
+  </div>
+
+  <div class="main-container">
+    <div id="game-wrapper">
+      <div id="game"></div>
+    </div>
+
+    <div class="dashboard">
+      <div class="stat-card">
+        <div class="stat-title">Pontuação</div>
+        <div class="stat-value" id="val-score">0</div>
+      </div>
+
+      <div class="stat-card gold">
+        <div class="stat-title">Moedas</div>
+        <div class="stat-value" id="val-coins">0</div>
+      </div>
+
+      <div class="stat-card green">
+        <div class="stat-title">Vidas</div>
+        <div class="stat-value" id="val-lives">0</div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-title">Power-up</div>
+        <div class="stat-value" id="val-powerup">Pequeno</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Script principal da integração -->
+  <script>
+    const powerUpNames = {
+      0: "Pequeno",
+      1: "Super Cogumelo",
+      2: "Pena",
+      3: "Flor de Fogo"
+    };
+
+    document.getElementById('rom-input').addEventListener('change', function(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const romUrl = URL.createObjectURL(file);
+
+      // Configuração do EmulatorJS
+      window.EJS_player = '#game';
+      window.EJS_core = 'snes';
+      window.EJS_gameUrl = romUrl;
+      window.EJS_pathtodata = 'https://cdn.emulatorjs.org/stable/data/';
+      
+      // Callback quando o emulador estiver pronto
+      window.EJS_onReady = function() {
+        console.log("Emulador pronto. Iniciando leitura da RAM...");
+        startRamReader();
+      };
+
+      // Carrega o script principal do EmulatorJS dinamicamente
+      const loaderScript = document.createElement('script');
+      loaderScript.src = 'https://cdn.emulatorjs.org/stable/data/loader.js';
+      document.body.appendChild(loaderScript);
+    });
+
+    function startRamReader() {
+      setInterval(() => {
+        try {
+          // Acessa o objeto de memória WebAssembly (Emscripten FS/Memory)
+          if (window.EJS_emulator && window.EJS_emulator.Module && window.EJS_emulator.Module.HEAPU8) {
+            const memory = window.EJS_emulator.Module.HEAPU8;
+
+            // Busca o ponteiro da WRAM no core bsnes/snes9x se exposto pelo retro_get_memory_data
+            // Nota: Em variações WebAssembly, acessamos a WRAM via offsets padrão do libretro ou export da RAM.
+            if (typeof window.EJS_emulator.getMemory === 'function') {
+              const wram = window.EJS_emulator.getMemory();
+
+              const lives = wram[0x0DBE] + 1; // 0x7E0DBE (Off-by-one na RAM original)
+              const coins = wram[0x0DBF];      // 0x7E0DBF
+              const powerUp = wram[0x0019];    // 0x7E0019
+
+              // Pontuação (3 bytes em little-endian)
+              const scoreByte1 = wram[0x0F34];
+              const scoreByte2 = wram[0x0F35];
+              const scoreByte3 = wram[0x0F36];
+              const score = ((scoreByte3 << 16) | (scoreByte2 << 8) | scoreByte1) * 10;
+
+              // Atualiza o Dashboard UI
+              document.getElementById('val-lives').innerText = isNaN(lives) ? 0 : lives;
+              document.getElementById('val-coins').innerText = coins || 0;
+              document.getElementById('val-score').innerText = score || 0;
+              document.getElementById('val-powerup').innerText = powerUpNames[powerUp] || "Desconhecido";
+            }
+          }
+        } catch (err) {
+          // Ocorre durante telas de carregamento ou transição de memória
+        }
+      }, 100); // Atualiza 10 vezes por segundo
+    }
+  </script>
+</body>
+</html>
